@@ -1,0 +1,10 @@
+logs/*
+!logs/.gitkeep
+data/*
+!data/.gitkeep
+config/airflow.cfg
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.DS_Store

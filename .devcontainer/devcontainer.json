@@ -1,0 +1,14 @@
+{
+  "name": "citibike-airflow",
+  "dockerComposeFile": ["../docker-compose.yaml"],
+  "service": "dev",
+  "runServices": ["dev", "postgres", "pipeline-db", "airflow-init", "airflow-apiserver",
+                  "airflow-scheduler", "airflow-dag-processor", "airflow-triggerer"],
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [8080, 5433],
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-toolsai.jupyter"]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+pandas
+pyarrow
+scikit-learn
+matplotlib
+requests
+SQLAlchemy
+psycopg[binary]
+pytest
