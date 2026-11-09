@@ -1,0 +1,17 @@
+{
+  "dataset": "citibike_hourly_latest.csv",
+  "produced_by": "Airflow DAG citibike_weather_pipeline (task analysis.publish_for_agents)",
+  "grain": "one row per hour, Jersey City Citi Bike system",
+  "target": "high_demand",
+  "target_definition": "trips >= 210 (the 75% quantile)",
+  "positive_rate": 0.2509,
+  "time_column": "hour",
+  "leakage_columns": [
+    "trips",
+    "member_share",
+    "ebike_share",
+    "avg_duration_min"
+  ],
+  "n_rows": 4392,
+  "period": "2026-04-01 00:00 to 2026-09-30 23:00"
+}
