@@ -15,12 +15,29 @@ MIN_DURATION_MIN = 1.0  # shorter = false starts / re-docks
 MAX_DURATION_MIN = 240.0  # longer = lost or unreturned bikes
 
 
+MAX_WEATHER_GAP_HOURS = 3
+
+
 def hourly_index(months: list[str]) -> pd.DatetimeIndex:
-    first, _ = month_bounds(min(months))
-    _, last = month_bounds(max(months))
-    return pd.date_range(
-        pd.Timestamp(first), pd.Timestamp(last) + pd.Timedelta(hours=23), freq="h", name="hour"
-    )
+    """Every hour of the requested months only (months need not be consecutive)."""
+    parts = []
+    for m in sorted(set(months)):
+        first, last = month_bounds(m)
+        parts.append(pd.date_range(pd.Timestamp(first), pd.Timestamp(last) + pd.Timedelta(hours=23), freq="h"))
+    return pd.DatetimeIndex(parts[0].append(parts[1:]), name="hour")
+
+
+def fill_short_gaps(s: pd.Series, max_gap: int = MAX_WEATHER_GAP_HOURS) -> pd.Series:
+    """Interpolate runs of at most `max_gap` consecutive missing values; leave longer runs missing.
+
+    (pandas' interpolate(limit=3, limit_direction="both") fills 3 from EACH side, so a
+    6-hour hole would be filled completely; this fills only genuinely short gaps.)
+    """
+    isna = s.isna()
+    run_id = (isna != isna.shift()).cumsum()
+    run_len = isna.groupby(run_id).transform("sum")
+    short = isna & (run_len <= max_gap)
+    return s.where(~short, s.interpolate(limit_direction="both"))
 
 
 def read_trip_zip(path: str | Path) -> pd.DataFrame:
@@ -63,7 +80,7 @@ def clean_trips(raw: pd.DataFrame, months: list[str]) -> tuple[pd.DataFrame, dic
     df = df[~bad_dur]
 
     idx = hourly_index(months)
-    outside = (df["started_at"] < idx[0]) | (df["started_at"] >= idx[-1] + pd.Timedelta(hours=1))
+    outside = ~df["started_at"].dt.floor("h").isin(idx)
     report["dropped_outside_window"] = int(outside.sum())
     df = df[~outside]
 
@@ -132,7 +149,8 @@ def clean_weather(raw: pd.DataFrame, months: list[str]) -> tuple[pd.DataFrame, d
 
     df = df.reindex(hourly_index(months))
     report["missing_values_before_fill"] = int(df[value_cols].isna().sum().sum())
-    df[value_cols] = df[value_cols].interpolate(limit=3, limit_direction="both")
+    for col in value_cols:
+        df[col] = fill_short_gaps(df[col])
     still_missing = df[value_cols].isna().any(axis=1)
     report["dropped_unfillable_hours"] = int(still_missing.sum())
     df = df[~still_missing]

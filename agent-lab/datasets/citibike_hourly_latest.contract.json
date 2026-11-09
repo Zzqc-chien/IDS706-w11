@@ -3,8 +3,9 @@
   "produced_by": "Airflow DAG citibike_weather_pipeline (task analysis.publish_for_agents)",
   "grain": "one row per hour, Jersey City Citi Bike system",
   "target": "high_demand",
-  "target_definition": "trips >= 210 (the 75% quantile)",
-  "positive_rate": 0.2509,
+  "target_definition": "trips >= 198",
+  "threshold_basis": "75% quantile of trips in the first 60% of hours (up to 2026-07-19 18:00); later hours use the same fixed threshold",
+  "positive_rate": 0.278,
   "time_column": "hour",
   "leakage_columns": [
     "trips",

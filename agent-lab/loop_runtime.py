@@ -22,7 +22,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 REPO = Path(__file__).resolve().parent
 
@@ -330,6 +330,7 @@ def _build_model(family: str, hp: dict):
         return HistGradientBoostingClassifier(
             learning_rate=float(hp.get("learning_rate", 0.1)),
             max_iter=int(hp.get("max_iter", 100)),
+            random_state=42,  # early stopping samples a validation subset; fix it for reproducibility
         )
     return RandomForestClassifier(
         n_estimators=int(hp.get("n_estimators", 100)),
@@ -395,7 +396,8 @@ def _build_pipeline(X_train: pd.DataFrame, spec: dict) -> Pipeline:
     cat_cols = [c for c in X_train.columns if c not in num_cols]
     pre = ColumnTransformer(
         [
-            ("num", SimpleImputer(strategy="median"), num_cols),
+            # scaling: logistic regression converges (no effect on tree models)
+            ("num", Pipeline([("imp", SimpleImputer(strategy="median")), ("scale", StandardScaler())]), num_cols),
             (
                 "cat",
                 Pipeline(

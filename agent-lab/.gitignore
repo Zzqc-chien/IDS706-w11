@@ -47,3 +47,7 @@ mini_loop/**/__pycache__/
 # Airflow publish (runtime)
 datasets/airflow/merged_latest.csv
 datasets/airflow/latest_handoff.json
+
+# Part 3 evaluation scratch (dashboard.html / summary.md / results.json are kept)
+adaptive/eval/out/data/
+adaptive/eval/out/reports/

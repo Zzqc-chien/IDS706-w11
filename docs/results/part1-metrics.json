@@ -1,0 +1,29 @@
+{
+  "model": "RandomForestRegressor",
+  "target": "trips per hour",
+  "n_train": 3513,
+  "n_test": 879,
+  "train_period": "2026-04-01 to 2026-08-25",
+  "test_period": "2026-08-25 to 2026-09-30",
+  "baseline_mae": 33.06857359553606,
+  "baseline_rmse": 50.25788392550291,
+  "baseline_r2": 0.8154228469345185,
+  "rf_time_mae": 32.52822585689907,
+  "rf_time_rmse": 49.420782863220474,
+  "rf_time_r2": 0.8215203167467084,
+  "rf_mae": 27.535958699077014,
+  "rf_rmse": 40.90360122938555,
+  "rf_r2": 0.8777376788103539,
+  "sklearn_version": "1.9.1",
+  "feature_importances": {
+    "hour_of_day": 0.7298980074743768,
+    "day_of_week": 0.07573789359038725,
+    "temp_c": 0.07315628936115454,
+    "humidity_pct": 0.04264244877265901,
+    "is_weekend": 0.037992144327282075,
+    "precip_mm": 0.017235530941291582,
+    "wind_kmh": 0.016553846736562933,
+    "is_holiday": 0.005114946552421013,
+    "is_raining": 0.001668892243864876
+  }
+}

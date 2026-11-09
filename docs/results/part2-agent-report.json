@@ -1,0 +1,122 @@
+{
+  "sklearn_version": "1.9.1",
+  "dataset": "citibike_hourly_latest.csv",
+  "target": "high_demand",
+  "validation": {
+    "status": "ok",
+    "n_rows": 4392,
+    "n_columns": 16,
+    "target_rate": 0.2780054644808743,
+    "time_column": "hour",
+    "split": "chronological",
+    "leakage_columns": [
+      "trips",
+      "member_share",
+      "ebike_share",
+      "avg_duration_min"
+    ],
+    "must_drop": [
+      "trips",
+      "member_share",
+      "ebike_share",
+      "avg_duration_min",
+      "hour"
+    ],
+    "contract_found": true,
+    "issues": [],
+    "warnings": []
+  },
+  "experiments": [
+    {
+      "cycle": 1,
+      "model_family": "logistic_regression",
+      "hyperparameters": {
+        "C": 0.25,
+        "max_iter": 1000
+      },
+      "val_f1": 0.5880681818181818,
+      "verdict": "revise"
+    },
+    {
+      "cycle": 2,
+      "model_family": "random_forest",
+      "hyperparameters": {
+        "n_estimators": 150,
+        "max_depth": 6
+      },
+      "val_f1": 0.7716312056737589,
+      "verdict": "revise"
+    },
+    {
+      "cycle": 3,
+      "model_family": "hist_gradient_boosting",
+      "hyperparameters": {
+        "learning_rate": 0.1,
+        "max_iter": 100
+      },
+      "val_f1": 0.8888888888888888,
+      "verdict": "accept"
+    }
+  ],
+  "best_spec": {
+    "experiment_id": "exp-3",
+    "model_family": "hist_gradient_boosting",
+    "hyperparameters": {
+      "learning_rate": 0.1,
+      "max_iter": 100
+    },
+    "drop_columns": [
+      "trips",
+      "member_share",
+      "ebike_share",
+      "avg_duration_min",
+      "hour"
+    ],
+    "rationale": "heuristic HPT from plan focus=model_family_switch: hist_gradient_boosting"
+  },
+  "split": "chronological",
+  "features_used": [
+    "temp_c",
+    "precip_mm",
+    "wind_kmh",
+    "humidity_pct",
+    "hour_of_day",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "is_holiday",
+    "is_raining"
+  ],
+  "holdout_metrics": {
+    "f1": 0.8625954198473282,
+    "accuracy": 0.9180887372013652,
+    "precision": 0.8793774319066148,
+    "recall": 0.846441947565543,
+    "n_holdout": 879,
+    "split": "chronological"
+  },
+  "majority_baseline": {
+    "predicts": "0",
+    "f1": 0.0,
+    "accuracy": 0.6962457337883959,
+    "precision": 0.0,
+    "recall": 0.0
+  },
+  "confusion_matrix": {
+    "labels": [
+      "0",
+      "1"
+    ],
+    "rows_true_cols_pred": [
+      [
+        581,
+        31
+      ],
+      [
+        41,
+        226
+      ]
+    ]
+  },
+  "feature_importances": {}
+}

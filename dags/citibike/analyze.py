@@ -10,20 +10,13 @@ matplotlib.use("Agg")  # no display inside the container
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-FEATURES = [
-    "hour_of_day",
-    "day_of_week",
-    "is_weekend",
-    "is_holiday",
-    "temp_c",
-    "precip_mm",
-    "wind_kmh",
-    "humidity_pct",
-    "is_raining",
-]
+TIME_FEATURES = ["hour_of_day", "day_of_week", "is_weekend", "is_holiday"]
+WEATHER_FEATURES = ["temp_c", "precip_mm", "wind_kmh", "humidity_pct", "is_raining"]
+FEATURES = TIME_FEATURES + WEATHER_FEATURES
 TARGET = "trips"
 TEST_FRACTION = 0.2
 
@@ -74,8 +67,21 @@ def _metrics(y_true, y_pred) -> dict:
     }
 
 
+def _rf() -> RandomForestRegressor:
+    return RandomForestRegressor(n_estimators=300, min_samples_leaf=2, random_state=42, n_jobs=-1)
+
+
 def train_and_evaluate(df: pd.DataFrame, out_dir: str | Path) -> dict:
-    """Random forest vs a seasonal-average baseline, on the last 20% of hours (time-based split)."""
+    """Three models on the last 20% of hours (time-based split):
+
+    1. seasonal baseline: mean trips for the same (day of week, hour) in training
+    2. random forest on time features only
+    3. the same random forest on time + weather features
+
+    2 vs 3 changes only the inputs, so their difference is what weather adds.
+    Weather is *observed* weather for the hour, so this measures demand given known
+    conditions; forecasting ahead of time would need weather forecasts as input.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     train, test = chronological_split(df)
@@ -87,8 +93,10 @@ def train_and_evaluate(df: pd.DataFrame, out_dir: str | Path) -> dict:
         .fillna(train[TARGET].mean())
     )
 
-    model = RandomForestRegressor(n_estimators=300, min_samples_leaf=2, random_state=42, n_jobs=-1)
-    model.fit(train[FEATURES], train[TARGET])
+    time_model = _rf().fit(train[TIME_FEATURES], train[TARGET])
+    rf_time = _metrics(test[TARGET], time_model.predict(test[TIME_FEATURES]))
+
+    model = _rf().fit(train[FEATURES], train[TARGET])
     pred = model.predict(test[FEATURES])
 
     rf = _metrics(test[TARGET], pred)
@@ -100,8 +108,10 @@ def train_and_evaluate(df: pd.DataFrame, out_dir: str | Path) -> dict:
         "n_test": int(len(test)),
         "train_period": f"{train['hour'].min():%Y-%m-%d} to {train['hour'].max():%Y-%m-%d}",
         "test_period": f"{test['hour'].min():%Y-%m-%d} to {test['hour'].max():%Y-%m-%d}",
-        **{f"rf_{k}": v for k, v in rf.items()},
         **{f"baseline_{k}": v for k, v in base.items()},
+        **{f"rf_time_{k}": v for k, v in rf_time.items()},
+        **{f"rf_{k}": v for k, v in rf.items()},
+        "sklearn_version": sklearn.__version__,
     }
     importances = dict(
         sorted(zip(FEATURES, map(float, model.feature_importances_)), key=lambda kv: -kv[1])

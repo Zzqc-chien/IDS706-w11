@@ -14,8 +14,8 @@ New vs the in-class loop:
   * ml_engineer     always drops the validator's leakage columns (a guardrail that holds
                     even if the LLM forgets) and splits chronologically when there is a
                     time column.
-  * report_writer   (code agent) re-fits the best model and writes the confusion matrix,
-                    a majority-class baseline and feature importances to a report.
+  * report_writer   (code agent) writes the holdout results (confusion matrix, majority-class
+                    baseline, feature importances) and the experiment history to a report.
 
 LLM / train helpers live in loop_runtime.py (Cursor SDK + OpenRouter + heuristics).
 """
@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Annotated, TypedDict
 
 import pandas as pd
+import sklearn
 from sklearn.metrics import roc_auc_score
 from langgraph.graph import END, START, StateGraph
 
@@ -83,6 +84,7 @@ class SimpleLoopState(TypedDict, total=False):
     best_spec: dict
     best_val_f1: float
     validation: dict  # data_validator output: status, issues, time_column, must_drop
+    holdout_details: dict  # holdout_eval output reused by report_writer (single holdout fit)
     report: dict  # report_writer output
     holdout_metrics: dict
     stop_reason: str
@@ -543,7 +545,8 @@ def node_context_builder(state: SimpleLoopState) -> dict:
 
 
 def node_holdout(state: SimpleLoopState) -> dict:
-    """Score the best spec ONCE on the sealed holdout (same seed as ml_engineer)."""
+    """Score the best spec ONCE on the sealed holdout. This is the only holdout fit: the
+    metrics, confusion matrix, baseline and importances all come from this one model."""
     df = pd.read_csv(state["dataset_path"])
     target = state["target_column"]
     spec = state.get("best_spec") or state.get("experiment_spec") or {}
@@ -552,11 +555,29 @@ def node_holdout(state: SimpleLoopState) -> dict:
     if _validate_spec(spec):
         spec = _repair_heuristic(dict(spec), "invalid best_spec")
     time_column = (state.get("validation") or {}).get("time_column")
-    metrics = _fit_score(
-        df, target, spec, seed, holdout_frac, on_holdout=True, time_column=time_column
+    X_tr, y_tr, X_ho, y_ho, _, split_kind = _split(
+        df, target, list(spec.get("drop_columns") or []), seed, holdout_frac,
+        on_holdout=True, time_column=time_column,
     )
+    pipe = _build_pipeline(X_tr, spec)
+    pipe.fit(X_tr, y_tr)
+    pred = pipe.predict(X_ho)
+    labels = sorted(pd.unique(pd.concat([y_tr, y_ho])))
+    majority = y_tr.mode().iloc[0]
+    cm = pd.crosstab(pd.Categorical(y_ho, categories=labels), pd.Categorical(pred, categories=labels), dropna=False)
+    metrics = {**_classification_metrics(y_ho, pred), "n_holdout": int(len(y_ho)), "split": split_kind}
+    details = {
+        "best_spec": spec,
+        "split": split_kind,
+        "features_used": list(X_tr.columns),
+        "holdout_metrics": metrics,
+        "majority_baseline": {"predicts": str(majority), **_classification_metrics(y_ho, [majority] * len(y_ho))},
+        "confusion_matrix": {"labels": [str(v) for v in labels], "rows_true_cols_pred": cm.values.tolist()},
+        "feature_importances": _feature_importances(pipe),
+    }
     return {
         "holdout_metrics": metrics,
+        "holdout_details": details,
         "stop_reason": "finalize",
         "steps": [{"node": "holdout_eval", "note": "sealed holdout", "metrics": metrics}],
     }
@@ -632,16 +653,22 @@ def node_data_validator(state: SimpleLoopState) -> dict:
             issues.append(f"{dup} duplicate {time_column!r} values (expected one row per period)")
 
     leakage = [c for c in contract.get("leakage_columns") or [] if c in df.columns]
-    if target in df.columns and df[target].nunique(dropna=True) == 2:
-        y = pd.Series(pd.factorize(df[target])[0], index=df.index)
-        for col in df.columns:
-            if col in (target, time_column) or col in leakage:
+    if target in df.columns and df[target].nunique(dropna=True) == 2 and not issues:
+        # Label-dependent screening uses the TRAINING segment only (same split the ML
+        # Engineer uses), so validation/holdout labels never influence which columns stay.
+        X_tr, y_tr, *_ = _split(
+            df, target, [], int(state.get("seed") or 42), float(state.get("holdout_frac") or 0.2),
+            on_holdout=False, time_column=time_column,
+        )
+        y = pd.Series(pd.factorize(y_tr)[0], index=y_tr.index)
+        for col in X_tr.columns:
+            if col in leakage or y.nunique() < 2:
                 continue
-            if pd.api.types.is_numeric_dtype(df[col]) and df[col].nunique() > 1:
+            if pd.api.types.is_numeric_dtype(X_tr[col]) and X_tr[col].nunique() > 1:
                 # AUC of the raw column as a score: 1.0 means a single threshold on this
                 # column reproduces the label, e.g. a label defined as `trips >= q`.
-                ok = df[col].notna()
-                auc = roc_auc_score(y[ok], df.loc[ok, col])
+                ok = X_tr[col].notna()
+                auc = roc_auc_score(y[ok], X_tr.loc[ok, col])
                 auc = max(auc, 1 - auc)
                 if auc >= LEAKAGE_AUC_THRESHOLD:
                     leakage.append(col)
@@ -706,8 +733,9 @@ def _feature_importances(pipe, top: int = 8) -> dict:
 def node_report_writer(state: SimpleLoopState) -> dict:
     """Code agent (no LLM): turn the run into an evaluation report a human can check.
 
-    Re-fits the best spec on the same split as holdout_eval, then adds what the F1 number
-    alone hides: the confusion matrix, a majority-class baseline, and feature importances.
+    Formats holdout_eval's single holdout fit (no re-training) together with what the F1
+    number alone hides: the confusion matrix, a majority-class baseline, feature
+    importances, and every experiment the loop ran.
     """
     validation = state.get("validation") or {}
     memory = state.get("memory") or {}
@@ -738,55 +766,20 @@ def node_report_writer(state: SimpleLoopState) -> dict:
         )
 
     report: dict = {
+        "sklearn_version": sklearn.__version__,
         "dataset": Path(state["dataset_path"]).name,
         "target": state.get("target_column"),
         "validation": validation,
         "experiments": experiments,
     }
 
-    if validation.get("status") != "invalid" and state.get("best_spec"):
-        df = pd.read_csv(state["dataset_path"])
-        spec = state["best_spec"]
-        X_tr, y_tr, X_ho, y_ho, _, split_kind = _split(
-            df,
-            state["target_column"],
-            list(spec.get("drop_columns") or []),
-            int(state.get("seed") or 42),
-            float(state.get("holdout_frac") or 0.2),
-            on_holdout=True,
-            time_column=validation.get("time_column"),
-        )
-        pipe = _build_pipeline(X_tr, spec)
-        pipe.fit(X_tr, y_tr)
-        pred = pipe.predict(X_ho)
-        labels = sorted(pd.unique(pd.concat([y_tr, y_ho])))
-        majority = y_tr.mode().iloc[0]
-        cm = pd.crosstab(
-            pd.Categorical(y_ho, categories=labels),
-            pd.Categorical(pred, categories=labels),
-            dropna=False,
-        )
-        report.update(
-            {
-                "best_spec": spec,
-                "split": split_kind,
-                "features_used": list(X_tr.columns),
-                "holdout_metrics": _classification_metrics(y_ho, pred),
-                "majority_baseline": {
-                    "predicts": str(majority),
-                    **_classification_metrics(y_ho, [majority] * len(y_ho)),
-                },
-                "confusion_matrix": {
-                    "labels": [str(v) for v in labels],
-                    "rows_true_cols_pred": cm.values.tolist(),
-                },
-                "feature_importances": _feature_importances(pipe),
-            }
-        )
+    details = state.get("holdout_details") or {}
+    if details:
+        report.update(details)
         note = (
-            f"holdout f1={report['holdout_metrics']['f1']:.3f} "
-            f"acc={report['holdout_metrics']['accuracy']:.3f} "
-            f"(majority baseline acc={report['majority_baseline']['accuracy']:.3f})"
+            f"holdout f1={details['holdout_metrics']['f1']:.3f} "
+            f"acc={details['holdout_metrics']['accuracy']:.3f} "
+            f"(majority baseline acc={details['majority_baseline']['accuracy']:.3f})"
         )
     else:
         note = "no model trained: " + "; ".join(validation.get("issues") or ["no best spec"])

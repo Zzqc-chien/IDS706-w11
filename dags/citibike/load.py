@@ -28,19 +28,30 @@ def upsert_hourly(df: pd.DataFrame, uri: str | None = None, table: str = TABLE) 
     return int(total)
 
 
-def read_hourly(uri: str | None = None, table: str = TABLE) -> pd.DataFrame:
+def read_hourly(uri: str | None = None, table: str = TABLE, months: list[str] | None = None) -> pd.DataFrame:
+    """Read the cleaned table. With `months`, only those months (the run's own window);
+    the table keeps older months from earlier runs, so without a filter the analysis
+    would silently grow over time."""
     engine = get_engine(uri)
     with engine.connect() as conn:
         df = pd.read_sql(text(f"SELECT * FROM {table} ORDER BY hour"), conn, parse_dates=["hour"])
     engine.dispose()
+    if months:
+        df = df[df["hour"].dt.strftime("%Y-%m").isin(set(months))].reset_index(drop=True)
     return df
 
 
 def save_metrics(metrics: dict, run_id: str, uri: str | None = None) -> None:
-    row = pd.DataFrame(
-        [{"run_id": run_id, "created_at": pd.Timestamp.now(tz="UTC").tz_localize(None), **metrics}]
-    )
+    """Append one row per run. Metrics are stored as JSON so adding a metric later never
+    breaks the table schema (an earlier version used one column per metric)."""
+    import json
+
+    row = pd.DataFrame([{
+        "run_id": run_id,
+        "created_at": pd.Timestamp.now(tz="UTC").tz_localize(None),
+        "metrics_json": json.dumps(metrics, default=str),
+    }])
     engine = get_engine(uri)
     with engine.begin() as conn:
-        row.to_sql("model_metrics", conn, if_exists="append", index=False)
+        row.to_sql("model_runs", conn, if_exists="append", index=False)
     engine.dispose()

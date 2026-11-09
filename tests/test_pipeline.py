@@ -103,3 +103,39 @@ def test_publish_for_agents_writes_csv_and_contract(raw_dir, cleaned, tmp_path):
     assert 0.2 < df["high_demand"].mean() < 0.3
     assert contract["time_column"] == "hour" and contract["leakage_columns"] == LEAKAGE_COLUMNS
     assert contract["n_rows"] == len(df) == len(merged)
+
+
+def test_fill_short_gaps_only_fills_up_to_three_hours():
+    s = pd.Series([1.0, None, None, None, 5.0, None, None, None, None, None, None, 12.0])
+    out = transform.fill_short_gaps(s)
+    assert out.iloc[1:4].notna().all()  # 3-hour gap filled
+    assert out.iloc[5:11].isna().all()  # 6-hour gap left missing (pandas' limit=3 would fill it)
+
+
+def test_non_consecutive_months_do_not_include_the_gap():
+    idx = transform.hourly_index(["2026-04", "2026-06"])
+    assert len(idx) == (30 + 30) * 24
+    assert not (idx.month == 5).any()
+
+
+def test_publish_threshold_uses_training_segment_only(raw_dir, cleaned):
+    from citibike.publish import TRAIN_SEGMENT, build_agent_dataset
+
+    _, trips, _ = cleaned
+    hourly = transform.trips_to_hourly(trips, MONTHS)
+    # make the later (validation/holdout) period much busier: the threshold must not move
+    late = hourly.index >= int(len(hourly) * TRAIN_SEGMENT)
+    busier = hourly.copy()
+    busier.loc[late, "trips"] *= 10
+    t1 = build_agent_dataset(hourly)[1]["target_definition"]
+    t2 = build_agent_dataset(busier)[1]["target_definition"]
+    assert t1 == t2
+
+
+def test_model_report_includes_time_only_ablation(raw_dir, cleaned, tmp_path):
+    _, trips, _ = cleaned
+    weather = pd.concat([transform.read_weather_json(raw_dir / "weather" / f"weather-{m}.json") for m in MONTHS])
+    w, _ = transform.clean_weather(weather, MONTHS)
+    merged = transform.merge_hourly(transform.trips_to_hourly(trips, MONTHS), w)
+    m = analyze.train_and_evaluate(merged, tmp_path)
+    assert {"baseline_r2", "rf_time_r2", "rf_r2", "sklearn_version"} <= set(m)

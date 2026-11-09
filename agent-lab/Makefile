@@ -3,7 +3,7 @@ VENV := .venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-.PHONY: ensure-env up down down-mac down-windows logs test install health venv \
+.PHONY: part3-eval part3-run test-agents ensure-env up down down-mac down-windows logs test install health venv \
 	demo-sse rebuild-gateway frontend start start-mac start-windows airflow
 
 ensure-env:
@@ -98,3 +98,21 @@ demo-sse:
 	  -d '{"target_column":"churned","scenario":"$(SCENARIO)"}' | $(PYTHON) -c 'import sys,json; print(json.load(sys.stdin)["session_id"])'); \
 	echo "session=$$SID scenario=$(SCENARIO)"; \
 	curl -sf -N "http://127.0.0.1:8000/sessions/$$SID/events"
+
+# ---------------------------------------------------------------------------
+# Part 3 (adaptive multi-agent): runs in a throwaway Python 3.12 container
+# ---------------------------------------------------------------------------
+PART3_IMAGE := python:3.12-slim
+PART3_RUN := docker run --rm -v "$(CURDIR)":/work -w /work -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONUNBUFFERED=1 \
+	-e ADAPTIVE_USE_LLM -e OPENROUTER_API_KEY -e LANGSMITH_TRACING -e LANGSMITH_API_KEY -e LANGSMITH_PROJECT \
+	$(PART3_IMAGE) sh -c "pip install -q --root-user-action=ignore -r adaptive/requirements.txt &&
+
+part3-eval:  ## evaluation suite: 3 systems x all cases -> adaptive/eval/out/dashboard.html
+	$(PART3_RUN) python -m adaptive.eval.run"
+	@echo "Open adaptive/eval/out/dashboard.html"
+
+part3-run:  ## adaptive system on the real Citi Bike data (FAULT=transient|broken_rf to watch recovery)
+	$(PART3_RUN) python -m adaptive.run_cli --dataset datasets/citibike_hourly_latest.csv --target high_demand --fault $(or $(FAULT),none)"
+
+test-agents:  ## unit tests for the Part 2 changes and Part 3
+	$(PART3_RUN) pip install -q --root-user-action=ignore pytest && python -m pytest -q tests/unit/test_citibike_agents.py tests/unit/test_adaptive.py"

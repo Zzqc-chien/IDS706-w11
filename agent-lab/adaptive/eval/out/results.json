@@ -1,0 +1,6106 @@
+{
+  "generated_at": "2026-11-09 04:15",
+  "systems": {
+    "fixed_airflow": "Fixed Airflow workflow",
+    "inclass_agent": "In-class agent loop",
+    "adaptive": "Adaptive multi-agent (ours)"
+  },
+  "cases": [
+    {
+      "id": "C1",
+      "title": "Clean hourly data",
+      "input": {
+        "data": "synthetic hourly, 150 days, no leakage",
+        "target_score": 0.8,
+        "budget": 8
+      },
+      "expected": "Train a model that beats the majority baseline with holdout F1 \u2265 0.75, on a time-aware split, within budget.",
+      "note": "",
+      "pass_threshold": 0.8,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": true
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "title": "Strong leakage, no contract",
+      "input": {
+        "data": "synthetic + `trips` (defines the label) + `member_share`; contract lists nothing"
+      },
+      "expected": "Detect that `trips` leaks the label, exclude it, and still forecast well (F1 \u2265 0.75, but not a too-good-to-be-true \u2265 0.99).",
+      "note": "",
+      "pass_threshold": 0.8,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "leakage columns excluded ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true
+        },
+        {
+          "name": "system flags leakage ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "title": "Leakage declared in the data contract",
+      "input": {
+        "data": "synthetic + `trips`, `member_share`; contract lists both"
+      },
+      "expected": "Honor the producer's contract: exclude both declared columns.",
+      "note": "",
+      "pass_threshold": 0.8,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true
+        },
+        {
+          "name": "system flags leakage ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C4",
+      "title": "Weak leakage, no contract (limitation probe)",
+      "input": {
+        "data": "synthetic + `trips`, `member_share`; no contract file"
+      },
+      "expected": "Exclude `member_share` too. It is derived from the same rides but only weakly separates the classes. Expected to be hard for every system; included to show the limits of automatic detection.",
+      "note": "Known limitation: needs a contract (C3) or domain knowledge.",
+      "pass_threshold": 1.0,
+      "checks": [
+        {
+          "name": "leakage columns excluded ['member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "C5",
+      "title": "Invalid target (3 classes)",
+      "input": {
+        "data": "synthetic, `high_demand` replaced by low/mid/high"
+      },
+      "expected": "Reject before any training and say why (this workflow is binary classification). No crash, no wasted runs.",
+      "note": "",
+      "pass_threshold": 1.0,
+      "checks": [
+        {
+          "name": "rejects the invalid dataset",
+          "level": "final",
+          "criterion": "status == rejected (not trained, not crashed)",
+          "required": true
+        },
+        {
+          "name": "no training on invalid data",
+          "level": "coordination",
+          "criterion": "0 training runs",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C6",
+      "title": "Transient training failure",
+      "input": {
+        "data": "clean synthetic",
+        "fault_plan": {
+          "transient_failures": 1
+        }
+      },
+      "expected": "The first training run crashes (worker lost). Retry, and deliver a model of normal quality.",
+      "note": "",
+      "pass_threshold": 0.8,
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false
+        },
+        {
+          "name": "wastes \u2264 1 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C7",
+      "title": "Persistent failure of one model family",
+      "input": {
+        "data": "clean synthetic",
+        "fault_plan": {
+          "broken_families": [
+            "random_forest"
+          ]
+        }
+      },
+      "expected": "Random forest always crashes. Stop retrying it after a bounded number of tries, route to another family, and still deliver.",
+      "note": "",
+      "pass_threshold": 0.8,
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false
+        },
+        {
+          "name": "wastes \u2264 3 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C8",
+      "title": "Easy target: stop early",
+      "input": {
+        "data": "clean synthetic",
+        "target_score": 0.6,
+        "budget": 8
+      },
+      "expected": "The target is easy; stop as soon as it's met (\u2264 2 training runs) instead of spending the budget.",
+      "note": "",
+      "pass_threshold": 1.0,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "stops once target met (\u2264 2 runs)",
+          "level": "coordination",
+          "criterion": "training runs \u2264 2",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.6",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.6",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C9",
+      "title": "Unreachable target: search well",
+      "input": {
+        "data": "noisier synthetic",
+        "target_score": 0.97,
+        "budget": 8
+      },
+      "expected": "The target can't be reached. Use the budget on varied, non-repeated ideas (models, tuning, features), stop at the budget, and still deliver the best model.",
+      "note": "",
+      "pass_threshold": 0.75,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": true
+        },
+        {
+          "name": "no repeated experiments",
+          "level": "coordination",
+          "criterion": "1 \u2212 repeated / successful runs",
+          "required": false
+        },
+        {
+          "name": "uses \u2265 3 kinds of fix (models/tuning/features)",
+          "level": "coordination",
+          "criterion": "distinct strategy agents / k",
+          "required": false
+        },
+        {
+          "name": "holdout F1 \u2265 0.7",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.7",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C10",
+      "title": "Real Citi Bike data (from Part 1)",
+      "input": {
+        "data": "datasets/citibike_hourly_latest.csv (published by Airflow)",
+        "target_score": 0.8,
+        "budget": 8
+      },
+      "expected": "Exclude the contract's leakage columns, split by time, and forecast busy hours with F1 \u2265 0.75, beating the majority baseline.",
+      "note": "",
+      "pass_threshold": 0.8,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share', 'ebike_share', 'avg_duration_min']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "C11",
+      "title": "Generality: Titanic (no time column)",
+      "input": {
+        "data": "datasets/Titanic-Dataset.csv, target Survived",
+        "target_score": 0.8,
+        "budget": 6
+      },
+      "expected": "Work on a non-time-series dataset: random split, F1 \u2265 0.65, beats majority, within budget.",
+      "note": "",
+      "pass_threshold": 0.75,
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true
+        },
+        {
+          "name": "holdout F1 \u2265 0.65",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.65",
+          "required": false
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "results": [
+    {
+      "case": "C1",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8904428904428905,
+            "accuracy": 0.9347222222222222,
+            "precision": 0.8761467889908257,
+            "recall": 0.9052132701421801
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.92
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.75)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": true,
+          "score": 1.0,
+          "detail": "acc 0.935 vs majority 0.707"
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false,
+          "score": 1.0,
+          "detail": "chronological"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false,
+          "score": 1.0,
+          "detail": "1 training runs (budget 8)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C1",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5282167042889391,
+            "hyperparameters": {
+              "C": 2.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5097087378640777,
+            "hyperparameters": {
+              "C": 4.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 8,
+        "holdout": {
+          "metrics": {
+            "f1": 0.5538461538461539,
+            "accuracy": 0.6777777777777778
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 1.67
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true,
+          "score": 0.0,
+          "detail": "holdout F1 0.554 (need \u2265 0.75)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": true,
+          "score": 0.0,
+          "detail": "acc 0.678 vs majority 0.736"
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false,
+          "score": 0.0,
+          "detail": "random (stratified)"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false,
+          "score": 1.0,
+          "detail": "8 training runs (budget 8)"
+        }
+      ],
+      "score": 0.4,
+      "passed": false
+    },
+    {
+      "case": "C1",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5404255319148936,
+            "val_metrics": {
+              "f1": 0.5404255319148936,
+              "accuracy": 0.7,
+              "precision": 0.4652014652014652,
+              "recall": 0.6446700507614214
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.6987060998151571,
+            "val_metrics": {
+              "f1": 0.6987060998151571,
+              "accuracy": 0.7736111111111111,
+              "precision": 0.5494186046511628,
+              "recall": 0.9593908629441624
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8675324675324675,
+            "val_metrics": {
+              "f1": 0.8675324675324675,
+              "accuracy": 0.9291666666666667,
+              "precision": 0.8882978723404256,
+              "recall": 0.8477157360406091
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 3,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8899755501222494,
+            "accuracy": 0.9375,
+            "precision": 0.9191919191919192,
+            "recall": 0.8625592417061612
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                493,
+                16
+              ],
+              [
+                29,
+                182
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 4,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.6987060998151571
+          },
+          {
+            "step": 5,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.868 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.8675324675324675
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 1.03
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.75)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": true,
+          "score": 1.0,
+          "detail": "acc 0.938 vs majority 0.707"
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false,
+          "score": 1.0,
+          "detail": "chronological"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false,
+          "score": 1.0,
+          "detail": "3 training runs (budget 8)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C2",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "trips",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 1.0,
+            "accuracy": 1.0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining",
+            "trips",
+            "member_share"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.6
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: trips"
+        },
+        {
+          "name": "system flags leakage ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false,
+          "score": 0.0,
+          "detail": "flagged: none"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 0.0,
+          "detail": "F1 1.000 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 1.000 (need \u2265 0.75)"
+        }
+      ],
+      "score": 0.4,
+      "passed": false
+    },
+    {
+      "case": "C2",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "trips",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 1.0,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.9895833333333334,
+            "accuracy": 0.9944444444444445
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 0.35
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: trips"
+        },
+        {
+          "name": "system flags leakage ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false,
+          "score": 0.0,
+          "detail": "flagged: none"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 1.0,
+          "detail": "F1 0.990 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.990 (need \u2265 0.75)"
+        }
+      ],
+      "score": 0.6,
+      "passed": false
+    },
+    {
+      "case": "C2",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [
+          "trips"
+        ],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7018348623853211,
+            "val_metrics": {
+              "f1": 0.7018348623853211,
+              "accuracy": 0.8194444444444444,
+              "precision": 0.6401673640167364,
+              "recall": 0.7766497461928934
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "member_share"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7682403433476395,
+            "val_metrics": {
+              "f1": 0.7682403433476395,
+              "accuracy": 0.85,
+              "precision": 0.6654275092936803,
+              "recall": 0.9086294416243654
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "member_share"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8697916666666666,
+            "val_metrics": {
+              "f1": 0.8697916666666666,
+              "accuracy": 0.9305555555555556,
+              "precision": 0.893048128342246,
+              "recall": 0.8477157360406091
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "member_share"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 3,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8894348894348895,
+            "accuracy": 0.9375,
+            "precision": 0.923469387755102,
+            "recall": 0.8578199052132701
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                494,
+                15
+              ],
+              [
+                30,
+                181
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining",
+            "member_share"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.7018348623853211
+          },
+          {
+            "step": 4,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.7682403433476395
+          },
+          {
+            "step": 5,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.870 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.8697916666666666
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 1.05
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 1.0,
+          "detail": "none used"
+        },
+        {
+          "name": "system flags leakage ['trips']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false,
+          "score": 1.0,
+          "detail": "flagged: ['trips']"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 1.0,
+          "detail": "F1 0.889 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.889 (need \u2265 0.75)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C3",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "trips",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 1.0,
+            "accuracy": 1.0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining",
+            "trips",
+            "member_share"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.59
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: trips, member_share"
+        },
+        {
+          "name": "system flags leakage ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false,
+          "score": 0.0,
+          "detail": "flagged: none"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 0.0,
+          "detail": "F1 1.000 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 1.000 (need \u2265 0.75)"
+        }
+      ],
+      "score": 0.4,
+      "passed": false
+    },
+    {
+      "case": "C3",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "trips",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 1.0,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.9895833333333334,
+            "accuracy": 0.9944444444444445
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 0.39
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: trips, member_share"
+        },
+        {
+          "name": "system flags leakage ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false,
+          "score": 0.0,
+          "detail": "flagged: none"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 1.0,
+          "detail": "F1 0.990 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.990 (need \u2265 0.75)"
+        }
+      ],
+      "score": 0.6,
+      "passed": false
+    },
+    {
+      "case": "C3",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [
+          "trips",
+          "member_share"
+        ],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5404255319148936,
+            "val_metrics": {
+              "f1": 0.5404255319148936,
+              "accuracy": 0.7,
+              "precision": 0.4652014652014652,
+              "recall": 0.6446700507614214
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.6987060998151571,
+            "val_metrics": {
+              "f1": 0.6987060998151571,
+              "accuracy": 0.7736111111111111,
+              "precision": 0.5494186046511628,
+              "recall": 0.9593908629441624
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8675324675324675,
+            "val_metrics": {
+              "f1": 0.8675324675324675,
+              "accuracy": 0.9291666666666667,
+              "precision": 0.8882978723404256,
+              "recall": 0.8477157360406091
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 3,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8899755501222494,
+            "accuracy": 0.9375,
+            "precision": 0.9191919191919192,
+            "recall": 0.8625592417061612
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                493,
+                16
+              ],
+              [
+                29,
+                182
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 4,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.6987060998151571
+          },
+          {
+            "step": 5,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.868 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.8675324675324675
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 0.92
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 1.0,
+          "detail": "none used"
+        },
+        {
+          "name": "system flags leakage ['trips', 'member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns the system itself flagged",
+          "required": false,
+          "score": 1.0,
+          "detail": "flagged: ['trips', 'member_share']"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 1.0,
+          "detail": "F1 0.890 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.75)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C4",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "trips",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 1.0,
+            "accuracy": 1.0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining",
+            "trips",
+            "member_share"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.59
+      },
+      "checks": [
+        {
+          "name": "leakage columns excluded ['member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: member_share"
+        }
+      ],
+      "score": 0.0,
+      "passed": false
+    },
+    {
+      "case": "C4",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "trips",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 1.0,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.9895833333333334,
+            "accuracy": 0.9944444444444445
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 0.35
+      },
+      "checks": [
+        {
+          "name": "leakage columns excluded ['member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: member_share"
+        }
+      ],
+      "score": 0.0,
+      "passed": false
+    },
+    {
+      "case": "C4",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [
+          "trips"
+        ],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "member_share"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7018348623853211,
+            "val_metrics": {
+              "f1": 0.7018348623853211,
+              "accuracy": 0.8194444444444444,
+              "precision": 0.6401673640167364,
+              "recall": 0.7766497461928934
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "member_share"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7682403433476395,
+            "val_metrics": {
+              "f1": 0.7682403433476395,
+              "accuracy": 0.85,
+              "precision": 0.6654275092936803,
+              "recall": 0.9086294416243654
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "member_share"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8697916666666666,
+            "val_metrics": {
+              "f1": 0.8697916666666666,
+              "accuracy": 0.9305555555555556,
+              "precision": 0.893048128342246,
+              "recall": 0.8477157360406091
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "member_share"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 3,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8894348894348895,
+            "accuracy": 0.9375,
+            "precision": 0.923469387755102,
+            "recall": 0.8578199052132701
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                494,
+                15
+              ],
+              [
+                30,
+                181
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining",
+            "member_share"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.7018348623853211
+          },
+          {
+            "step": 4,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.7682403433476395
+          },
+          {
+            "step": 5,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.870 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.8697916666666666
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 1.0
+      },
+      "checks": [
+        {
+          "name": "leakage columns excluded ['member_share']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: member_share"
+        }
+      ],
+      "score": 0.0,
+      "passed": false
+    },
+    {
+      "case": "C5",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "crashed",
+        "error": "ValueError: Target is multiclass but average='binary'. Please choose another average setting, one of [None, 'micro', 'macro', 'weighted'].",
+        "flagged": [],
+        "features_used": null,
+        "experiments": null,
+        "attempts": 3,
+        "holdout": null,
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "train",
+          "train"
+        ],
+        "duration_s": 3.1
+      },
+      "checks": [
+        {
+          "name": "rejects the invalid dataset",
+          "level": "final",
+          "criterion": "status == rejected (not trained, not crashed)",
+          "required": true,
+          "score": 0.0,
+          "detail": "crashed"
+        },
+        {
+          "name": "no training on invalid data",
+          "level": "coordination",
+          "criterion": "0 training runs",
+          "required": false,
+          "score": 0.0,
+          "detail": "3 runs"
+        }
+      ],
+      "score": 0.0,
+      "passed": false
+    },
+    {
+      "case": "C5",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "crashed",
+        "error": "ValueError: Target is multiclass but average='binary'. Please choose another average setting, one of [None, 'micro', 'macro', 'weighted'].",
+        "flagged": [],
+        "features_used": null,
+        "experiments": [],
+        "attempts": 0,
+        "holdout": null,
+        "decisions": null,
+        "agent_path": [],
+        "duration_s": 3.33
+      },
+      "checks": [
+        {
+          "name": "rejects the invalid dataset",
+          "level": "final",
+          "criterion": "status == rejected (not trained, not crashed)",
+          "required": true,
+          "score": 0.0,
+          "detail": "crashed"
+        },
+        {
+          "name": "no training on invalid data",
+          "level": "coordination",
+          "criterion": "0 training runs",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 runs"
+        }
+      ],
+      "score": 0.5,
+      "passed": false
+    },
+    {
+      "case": "C5",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "rejected",
+        "error": "dataset rejected: target 'high_demand' has 3 classes; this loop needs a binary target",
+        "flagged": [],
+        "features_used": [],
+        "experiments": [],
+        "attempts": 0,
+        "holdout": null,
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "report_writer",
+            "reason": "dataset rejected: target 'high_demand' has 3 classes; this loop needs a binary target",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "report_writer"
+        ],
+        "duration_s": 0.02
+      },
+      "checks": [
+        {
+          "name": "rejects the invalid dataset",
+          "level": "final",
+          "criterion": "status == rejected (not trained, not crashed)",
+          "required": true,
+          "score": 1.0,
+          "detail": "rejected"
+        },
+        {
+          "name": "no training on invalid data",
+          "level": "coordination",
+          "criterion": "0 training runs",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 runs"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C6",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 2,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8904428904428905,
+            "accuracy": 0.9347222222222222,
+            "precision": 0.8761467889908257,
+            "recall": 0.9052132701421801
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.92
+      },
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true,
+          "score": 1.0,
+          "detail": "0 failed runs, final status trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.75)"
+        },
+        {
+          "name": "wastes \u2264 1 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 failed runs (\u2264 1 allowed)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C6",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5508474576271186,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 400
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5282167042889391,
+            "hyperparameters": {
+              "C": 2.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5097087378640777,
+            "hyperparameters": {
+              "C": 4.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 9,
+        "holdout": {
+          "metrics": {
+            "f1": 0.5538461538461539,
+            "accuracy": 0.6777777777777778
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 1.59
+      },
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true,
+          "score": 1.0,
+          "detail": "0 failed runs, final status trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 0.0,
+          "detail": "holdout F1 0.554 (need \u2265 0.75)"
+        },
+        {
+          "name": "wastes \u2264 1 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 failed runs (\u2264 1 allowed)"
+        }
+      ],
+      "score": 0.667,
+      "passed": false
+    },
+    {
+      "case": "C6",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "failed",
+            "error": "InjectedFault: injected transient failure (attempt 1): worker lost",
+            "val_f1": null
+          },
+          {
+            "attempt": 2,
+            "agent": "error_recovery",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5404255319148936,
+            "val_metrics": {
+              "f1": 0.5404255319148936,
+              "accuracy": 0.7,
+              "precision": 0.4652014652014652,
+              "recall": 0.6446700507614214
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.6987060998151571,
+            "val_metrics": {
+              "f1": 0.6987060998151571,
+              "accuracy": 0.7736111111111111,
+              "precision": 0.5494186046511628,
+              "recall": 0.9593908629441624
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 4,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8675324675324675,
+            "val_metrics": {
+              "f1": 0.8675324675324675,
+              "accuracy": 0.9291666666666667,
+              "precision": 0.8882978723404256,
+              "recall": 0.8477157360406091
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 4,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8899755501222494,
+            "accuracy": 0.9375,
+            "precision": 0.9191919191919192,
+            "recall": 0.8625592417061612
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                493,
+                16
+              ],
+              [
+                29,
+                182
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "error_recovery",
+            "reason": "last run failed (InjectedFault: injected transient failure (attempt 1): worker lost); retry",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": null
+          },
+          {
+            "step": 4,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 5,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.6987060998151571
+          },
+          {
+            "step": 6,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.868 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 4,
+            "best_val_f1": 0.8675324675324675
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "error_recovery",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 1.01
+      },
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true,
+          "score": 1.0,
+          "detail": "1 failed runs, final status trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.75)"
+        },
+        {
+          "name": "wastes \u2264 1 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false,
+          "score": 1.0,
+          "detail": "1 failed runs (\u2264 1 allowed)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C7",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "crashed",
+        "error": "InjectedFault: injected persistent failure: random_forest crashes on this platform",
+        "flagged": [],
+        "features_used": null,
+        "experiments": null,
+        "attempts": 3,
+        "holdout": null,
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "train",
+          "train"
+        ],
+        "duration_s": 0.0
+      },
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true,
+          "score": 0.0,
+          "detail": "0 failed runs, final status crashed"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 0.0,
+          "detail": "no model"
+        },
+        {
+          "name": "wastes \u2264 3 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false,
+          "score": 1.0,
+          "detail": "3 failed runs (\u2264 3 allowed)"
+        }
+      ],
+      "score": 0.333,
+      "passed": false
+    },
+    {
+      "case": "C7",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5282167042889391,
+            "hyperparameters": {
+              "C": 2.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5097087378640777,
+            "hyperparameters": {
+              "C": 4.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 8,
+        "holdout": {
+          "metrics": {
+            "f1": 0.5538461538461539,
+            "accuracy": 0.6777777777777778
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 1.55
+      },
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true,
+          "score": 1.0,
+          "detail": "0 failed runs, final status trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 0.0,
+          "detail": "holdout F1 0.554 (need \u2265 0.75)"
+        },
+        {
+          "name": "wastes \u2264 3 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 failed runs (\u2264 3 allowed)"
+        }
+      ],
+      "score": 0.667,
+      "passed": false
+    },
+    {
+      "case": "C7",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5404255319148936,
+            "val_metrics": {
+              "f1": 0.5404255319148936,
+              "accuracy": 0.7,
+              "precision": 0.4652014652014652,
+              "recall": 0.6446700507614214
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "failed",
+            "error": "InjectedFault: injected persistent failure: random_forest crashes on this platform",
+            "val_f1": null
+          },
+          {
+            "attempt": 3,
+            "agent": "error_recovery",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "failed",
+            "error": "InjectedFault: injected persistent failure: random_forest crashes on this platform",
+            "val_f1": null
+          },
+          {
+            "attempt": 4,
+            "agent": "error_recovery",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "failed",
+            "error": "InjectedFault: injected persistent failure: random_forest crashes on this platform",
+            "val_f1": null
+          },
+          {
+            "attempt": 5,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8675324675324675,
+            "val_metrics": {
+              "f1": 0.8675324675324675,
+              "accuracy": 0.9291666666666667,
+              "precision": 0.8882978723404256,
+              "recall": 0.8477157360406091
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 5,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8899755501222494,
+            "accuracy": 0.9375,
+            "precision": 0.9191919191919192,
+            "recall": 0.8625592417061612
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                493,
+                16
+              ],
+              [
+                29,
+                182
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 4,
+            "next_agent": "error_recovery",
+            "reason": "last run failed (InjectedFault: injected persistent failure: random_forest crashes on this platform); retry",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 5,
+            "next_agent": "error_recovery",
+            "reason": "last run failed (InjectedFault: injected persistent failure: random_forest crashes on this platform); retry",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 6,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 4,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 7,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.868 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 5,
+            "best_val_f1": 0.8675324675324675
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "error_recovery",
+          "judge",
+          "supervisor",
+          "error_recovery",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 0.73
+      },
+      "checks": [
+        {
+          "name": "recovers and delivers a model",
+          "level": "intermediate",
+          "criterion": "trained despite injected failures",
+          "required": true,
+          "score": 1.0,
+          "detail": "3 failed runs, final status trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.75)"
+        },
+        {
+          "name": "wastes \u2264 3 runs on failures",
+          "level": "coordination",
+          "criterion": "failed runs \u2264 limit",
+          "required": false,
+          "score": 1.0,
+          "detail": "3 failed runs (\u2264 3 allowed)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C8",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8904428904428905,
+            "accuracy": 0.9347222222222222,
+            "precision": 0.8761467889908257,
+            "recall": 0.9052132701421801
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.85
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "stops once target met (\u2264 2 runs)",
+          "level": "coordination",
+          "criterion": "training runs \u2264 2",
+          "required": true,
+          "score": 1.0,
+          "detail": "1 runs (target met \u2192 stop by 2)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.6",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.6",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.890 (need \u2265 0.6)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C8",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5282167042889391,
+            "hyperparameters": {
+              "C": 2.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5097087378640777,
+            "hyperparameters": {
+              "C": 4.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5535353535353535,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5484536082474227,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5520169851380042,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 8,
+        "holdout": {
+          "metrics": {
+            "f1": 0.5538461538461539,
+            "accuracy": 0.6777777777777778
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7363888888888889,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 2.22
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "stops once target met (\u2264 2 runs)",
+          "level": "coordination",
+          "criterion": "training runs \u2264 2",
+          "required": true,
+          "score": 0.0,
+          "detail": "8 runs (target met \u2192 stop by 2)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.6",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.6",
+          "required": false,
+          "score": 0.0,
+          "detail": "holdout F1 0.554 (need \u2265 0.6)"
+        }
+      ],
+      "score": 0.333,
+      "passed": false
+    },
+    {
+      "case": "C8",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5404255319148936,
+            "val_metrics": {
+              "f1": 0.5404255319148936,
+              "accuracy": 0.7,
+              "precision": 0.4652014652014652,
+              "recall": 0.6446700507614214
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.6987060998151571,
+            "val_metrics": {
+              "f1": 0.6987060998151571,
+              "accuracy": 0.7736111111111111,
+              "precision": 0.5494186046511628,
+              "recall": 0.9593908629441624
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 2,
+        "holdout": {
+          "metrics": {
+            "f1": 0.7240143369175627,
+            "accuracy": 0.7861111111111111,
+            "precision": 0.5821325648414986,
+            "recall": 0.957345971563981
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7069444444444445,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                364,
+                145
+              ],
+              [
+                9,
+                202
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.5404255319148936
+          },
+          {
+            "step": 4,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.699 \u2265 0.60)",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.6987060998151571
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 0.69
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "stops once target met (\u2264 2 runs)",
+          "level": "coordination",
+          "criterion": "training runs \u2264 2",
+          "required": true,
+          "score": 1.0,
+          "detail": "2 runs (target met \u2192 stop by 2)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.6",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.6",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.724 (need \u2265 0.6)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C9",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.7948164146868251,
+            "accuracy": 0.8680555555555556,
+            "precision": 0.7449392712550608,
+            "recall": 0.8518518518518519
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 1.16
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": true,
+          "score": 1.0,
+          "detail": "1 training runs (budget 8)"
+        },
+        {
+          "name": "no repeated experiments",
+          "level": "coordination",
+          "criterion": "1 \u2212 repeated / successful runs",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 repeated of 1"
+        },
+        {
+          "name": "uses \u2265 3 kinds of fix (models/tuning/features)",
+          "level": "coordination",
+          "criterion": "distinct strategy agents / k",
+          "required": false,
+          "score": 0.0,
+          "detail": "strategies used: ['fixed']"
+        },
+        {
+          "name": "holdout F1 \u2265 0.7",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.7",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.795 (need \u2265 0.7)"
+        }
+      ],
+      "score": 0.8,
+      "passed": true
+    },
+    {
+      "case": "C9",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5580448065173116,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5684647302904564,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5682819383259912,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5361305361305362,
+            "hyperparameters": {
+              "C": 2.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5024630541871922,
+            "hyperparameters": {
+              "C": 4.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5580448065173116,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5684647302904564,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.5682819383259912,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 8,
+        "holdout": {
+          "metrics": {
+            "f1": 0.5102880658436214,
+            "accuracy": 0.6694444444444444
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7355555555555555,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 2.18
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": true,
+          "score": 1.0,
+          "detail": "8 training runs (budget 8)"
+        },
+        {
+          "name": "no repeated experiments",
+          "level": "coordination",
+          "criterion": "1 \u2212 repeated / successful runs",
+          "required": false,
+          "score": 0.625,
+          "detail": "3 repeated of 8"
+        },
+        {
+          "name": "uses \u2265 3 kinds of fix (models/tuning/features)",
+          "level": "coordination",
+          "criterion": "distinct strategy agents / k",
+          "required": false,
+          "score": 0.333,
+          "detail": "strategies used: ['ml_engineer']"
+        },
+        {
+          "name": "holdout F1 \u2265 0.7",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.7",
+          "required": false,
+          "score": 0.0,
+          "detail": "holdout F1 0.510 (need \u2265 0.7)"
+        }
+      ],
+      "score": 0.592,
+      "passed": false
+    },
+    {
+      "case": "C9",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining",
+          "hour_sin",
+          "hour_cos",
+          "is_rush_hour",
+          "temp_comfort"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5376344086021505,
+            "val_metrics": {
+              "f1": 0.5376344086021505,
+              "accuracy": 0.7013888888888888,
+              "precision": 0.45787545787545786,
+              "recall": 0.6510416666666666
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.6765799256505576,
+            "val_metrics": {
+              "f1": 0.6765799256505576,
+              "accuracy": 0.7583333333333333,
+              "precision": 0.5260115606936416,
+              "recall": 0.9479166666666666
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "feature_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7568710359408034,
+            "val_metrics": {
+              "f1": 0.7568710359408034,
+              "accuracy": 0.8402777777777778,
+              "precision": 0.6370106761565836,
+              "recall": 0.9322916666666666
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "hour_sin",
+              "hour_cos",
+              "is_rush_hour"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 4,
+            "agent": "feature_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7381443298969073,
+            "val_metrics": {
+              "f1": 0.7381443298969073,
+              "accuracy": 0.8236111111111111,
+              "precision": 0.6109215017064846,
+              "recall": 0.9322916666666666
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "hour_sin",
+              "hour_cos",
+              "is_rush_hour",
+              "temp_comfort"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 5,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.77088948787062,
+            "val_metrics": {
+              "f1": 0.77088948787062,
+              "accuracy": 0.8819444444444444,
+              "precision": 0.7988826815642458,
+              "recall": 0.7447916666666666
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "hour_sin",
+              "hour_cos",
+              "is_rush_hour",
+              "temp_comfort"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 6,
+            "agent": "tuner",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 200
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7613941018766756,
+            "val_metrics": {
+              "f1": 0.7613941018766756,
+              "accuracy": 0.8763888888888889,
+              "precision": 0.7845303867403315,
+              "recall": 0.7395833333333334
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "hour_sin",
+              "hour_cos",
+              "is_rush_hour",
+              "temp_comfort"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 7,
+            "agent": "tuner",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.05,
+              "max_iter": 400
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7639257294429708,
+            "val_metrics": {
+              "f1": 0.7639257294429708,
+              "accuracy": 0.8763888888888889,
+              "precision": 0.7783783783783784,
+              "recall": 0.75
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "hour_sin",
+              "hour_cos",
+              "is_rush_hour",
+              "temp_comfort"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 8,
+            "agent": "tuner",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.05,
+              "max_iter": 800
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7340425531914894,
+            "val_metrics": {
+              "f1": 0.7340425531914894,
+              "accuracy": 0.8611111111111112,
+              "precision": 0.75,
+              "recall": 0.71875
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining",
+              "hour_sin",
+              "hour_cos",
+              "is_rush_hour",
+              "temp_comfort"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 8,
+        "holdout": {
+          "metrics": {
+            "f1": 0.7865707434052758,
+            "accuracy": 0.8763888888888889,
+            "precision": 0.8159203980099502,
+            "recall": 0.7592592592592593
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.7,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                467,
+                37
+              ],
+              [
+                52,
+                164
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining",
+            "hour_sin",
+            "hour_cos",
+            "is_rush_hour",
+            "temp_comfort"
+          ],
+          "split": "chronological",
+          "n_holdout": 720
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.5376344086021505
+          },
+          {
+            "step": 4,
+            "next_agent": "feature_engineer",
+            "reason": "still 0.29 below target after 2 working families; features are the likely bottleneck",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.6765799256505576
+          },
+          {
+            "step": 5,
+            "next_agent": "feature_engineer",
+            "reason": "still 0.21 below target after 2 working families; features are the likely bottleneck",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.7568710359408034
+          },
+          {
+            "step": 6,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 4,
+            "best_val_f1": 0.7568710359408034
+          },
+          {
+            "step": 7,
+            "next_agent": "tuner",
+            "reason": "all families tried; give hist_gradient_boosting more capacity",
+            "source": "rules",
+            "attempts_used": 5,
+            "best_val_f1": 0.77088948787062
+          },
+          {
+            "step": 8,
+            "next_agent": "tuner",
+            "reason": "all families tried; give hist_gradient_boosting more capacity",
+            "source": "rules",
+            "attempts_used": 6,
+            "best_val_f1": 0.77088948787062
+          },
+          {
+            "step": 9,
+            "next_agent": "tuner",
+            "reason": "all families tried; give hist_gradient_boosting more capacity",
+            "source": "rules",
+            "attempts_used": 7,
+            "best_val_f1": 0.77088948787062
+          },
+          {
+            "step": 10,
+            "next_agent": "holdout_eval",
+            "reason": "budget of 8 training runs used; finalize best",
+            "source": "rules",
+            "attempts_used": 8,
+            "best_val_f1": 0.77088948787062
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "feature_engineer",
+          "judge",
+          "supervisor",
+          "feature_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "tuner",
+          "judge",
+          "supervisor",
+          "tuner",
+          "judge",
+          "supervisor",
+          "tuner",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 5.29
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": true,
+          "score": 1.0,
+          "detail": "8 training runs (budget 8)"
+        },
+        {
+          "name": "no repeated experiments",
+          "level": "coordination",
+          "criterion": "1 \u2212 repeated / successful runs",
+          "required": false,
+          "score": 1.0,
+          "detail": "0 repeated of 8"
+        },
+        {
+          "name": "uses \u2265 3 kinds of fix (models/tuning/features)",
+          "level": "coordination",
+          "criterion": "distinct strategy agents / k",
+          "required": false,
+          "score": 1.0,
+          "detail": "strategies used: ['feature_engineer', 'ml_engineer', 'tuner']"
+        },
+        {
+          "name": "holdout F1 \u2265 0.7",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.7",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.787 (need \u2265 0.7)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C10",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "trips",
+          "member_share",
+          "ebike_share",
+          "avg_duration_min",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 1.0,
+            "accuracy": 1.0,
+            "precision": 1.0,
+            "recall": 1.0
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.6962457337883959,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "trips",
+            "member_share",
+            "ebike_share",
+            "avg_duration_min",
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.79
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share', 'ebike_share', 'avg_duration_min']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: trips, member_share, ebike_share, avg_duration_min"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 0.0,
+          "detail": "F1 1.000 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false,
+          "score": 1.0,
+          "detail": "chronological"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true,
+          "score": 1.0,
+          "detail": "holdout F1 1.000 (need \u2265 0.75)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false,
+          "score": 1.0,
+          "detail": "acc 1.000 vs majority 0.696"
+        }
+      ],
+      "score": 0.667,
+      "passed": false
+    },
+    {
+      "case": "C10",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "hour",
+          "trips",
+          "member_share",
+          "ebike_share",
+          "avg_duration_min",
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.9817444219066938,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.9663366336633663,
+            "accuracy": 0.9806598407281001
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.7219945355191257,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 0.44
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share', 'ebike_share', 'avg_duration_min']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 0.0,
+          "detail": "used: trips, member_share, ebike_share, avg_duration_min"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 1.0,
+          "detail": "F1 0.966 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false,
+          "score": 0.0,
+          "detail": "random (stratified)"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true,
+          "score": 1.0,
+          "detail": "holdout F1 0.966 (need \u2265 0.75)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false,
+          "score": 1.0,
+          "detail": "acc 0.981 vs majority 0.722"
+        }
+      ],
+      "score": 0.667,
+      "passed": false
+    },
+    {
+      "case": "C10",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [
+          "trips",
+          "member_share",
+          "ebike_share",
+          "avg_duration_min"
+        ],
+        "features_used": [
+          "temp_c",
+          "precip_mm",
+          "wind_kmh",
+          "humidity_pct",
+          "hour_of_day",
+          "day_of_week",
+          "month",
+          "is_weekend",
+          "is_holiday",
+          "is_raining"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.5880681818181818,
+            "val_metrics": {
+              "f1": 0.5880681818181818,
+              "accuracy": 0.6700796359499431,
+              "precision": 0.5024271844660194,
+              "recall": 0.708904109589041
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7716312056737589,
+            "val_metrics": {
+              "f1": 0.7716312056737589,
+              "accuracy": 0.8168373151308305,
+              "precision": 0.6585956416464891,
+              "recall": 0.9315068493150684
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          },
+          {
+            "attempt": 3,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.8888888888888888,
+            "val_metrics": {
+              "f1": 0.8888888888888888,
+              "accuracy": 0.9306029579067122,
+              "precision": 0.9494163424124513,
+              "recall": 0.8356164383561644
+            },
+            "features_used": [
+              "temp_c",
+              "precip_mm",
+              "wind_kmh",
+              "humidity_pct",
+              "hour_of_day",
+              "day_of_week",
+              "month",
+              "is_weekend",
+              "is_holiday",
+              "is_raining"
+            ],
+            "split": "chronological"
+          }
+        ],
+        "attempts": 3,
+        "holdout": {
+          "metrics": {
+            "f1": 0.8625954198473282,
+            "accuracy": 0.9180887372013652,
+            "precision": 0.8793774319066148,
+            "recall": 0.846441947565543
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.6962457337883959,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                581,
+                31
+              ],
+              [
+                41,
+                226
+              ]
+            ]
+          },
+          "features_used": [
+            "temp_c",
+            "precip_mm",
+            "wind_kmh",
+            "humidity_pct",
+            "hour_of_day",
+            "day_of_week",
+            "month",
+            "is_weekend",
+            "is_holiday",
+            "is_raining"
+          ],
+          "split": "chronological",
+          "n_holdout": 879
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.5880681818181818
+          },
+          {
+            "step": 4,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.7716312056737589
+          },
+          {
+            "step": 5,
+            "next_agent": "holdout_eval",
+            "reason": "target met (val f1 0.889 \u2265 0.80)",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.8888888888888888
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 1.08
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "leakage columns excluded ['trips', 'member_share', 'ebike_share', 'avg_duration_min']",
+          "level": "intermediate",
+          "criterion": "fraction of leak columns NOT used as features",
+          "required": true,
+          "score": 1.0,
+          "detail": "none used"
+        },
+        {
+          "name": "score is plausible (no leak)",
+          "level": "final",
+          "criterion": "holdout F1 < 0.99",
+          "required": true,
+          "score": 1.0,
+          "detail": "F1 0.863 (\u2265 0.99 means the label leaked)"
+        },
+        {
+          "name": "time-aware split",
+          "level": "intermediate",
+          "criterion": "holdout = latest hours (chronological)",
+          "required": false,
+          "score": 1.0,
+          "detail": "chronological"
+        },
+        {
+          "name": "holdout F1 \u2265 0.75",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.75",
+          "required": true,
+          "score": 1.0,
+          "detail": "holdout F1 0.863 (need \u2265 0.75)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false,
+          "score": 1.0,
+          "detail": "acc 0.918 vs majority 0.696"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C11",
+      "system": "fixed_airflow",
+      "result": {
+        "system": "fixed_airflow",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "PassengerId",
+          "Pclass",
+          "Name",
+          "Sex",
+          "Age",
+          "SibSp",
+          "Parch",
+          "Ticket",
+          "Fare",
+          "Cabin",
+          "Embarked"
+        ],
+        "experiments": [
+          {
+            "model_family": "random_forest",
+            "status": "succeeded",
+            "val_f1": null
+          }
+        ],
+        "attempts": 1,
+        "holdout": {
+          "metrics": {
+            "f1": 0.7272727272727273,
+            "accuracy": 0.7821229050279329,
+            "precision": 0.7027027027027027,
+            "recall": 0.7536231884057971
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.6145251396648045,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "features_used": [
+            "PassengerId",
+            "Pclass",
+            "Name",
+            "Sex",
+            "Age",
+            "SibSp",
+            "Parch",
+            "Ticket",
+            "Fare",
+            "Cabin",
+            "Embarked"
+          ],
+          "split": "random"
+        },
+        "decisions": null,
+        "agent_path": [
+          "extract",
+          "transform",
+          "train",
+          "evaluate"
+        ],
+        "duration_s": 0.39
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.65",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.65",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.727 (need \u2265 0.65)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false,
+          "score": 1.0,
+          "detail": "acc 0.782 vs majority 0.615"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false,
+          "score": 1.0,
+          "detail": "1 training runs (budget 6)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C11",
+      "system": "inclass_agent",
+      "result": {
+        "system": "inclass_agent",
+        "status": "trained",
+        "error": null,
+        "flagged": [
+          "PassengerId",
+          "Name",
+          "Ticket",
+          "Cabin"
+        ],
+        "features_used": [
+          "Pclass",
+          "Sex",
+          "Age",
+          "SibSp",
+          "Parch",
+          "Fare",
+          "Embarked"
+        ],
+        "experiments": [
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.7310344827586207,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.7361111111111112,
+            "hyperparameters": {
+              "C": 0.5,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.7361111111111112,
+            "hyperparameters": {
+              "C": 1.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.7361111111111112,
+            "hyperparameters": {
+              "C": 2.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.7361111111111112,
+            "hyperparameters": {
+              "C": 4.0,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          },
+          {
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "status": "succeeded",
+            "val_f1": 0.7310344827586207,
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 300
+            },
+            "feature_ops": []
+          }
+        ],
+        "attempts": 6,
+        "holdout": {
+          "metrics": {
+            "f1": 0.7605633802816901,
+            "accuracy": 0.8100558659217877
+          },
+          "split": "random (stratified)",
+          "majority_baseline": {
+            "accuracy": 0.6161616161616161,
+            "f1": 0.0
+          }
+        },
+        "decisions": null,
+        "agent_path": [
+          "data_scientist",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "memory_writer",
+          "context_builder",
+          "hypothesis_generator",
+          "ml_engineer",
+          "judge",
+          "holdout_eval"
+        ],
+        "duration_s": 0.34
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.65",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.65",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.761 (need \u2265 0.65)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false,
+          "score": 1.0,
+          "detail": "acc 0.810 vs majority 0.616"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false,
+          "score": 1.0,
+          "detail": "6 training runs (budget 6)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    },
+    {
+      "case": "C11",
+      "system": "adaptive",
+      "result": {
+        "system": "adaptive",
+        "status": "trained",
+        "error": null,
+        "flagged": [],
+        "features_used": [
+          "PassengerId",
+          "Pclass",
+          "Name",
+          "Sex",
+          "Age",
+          "SibSp",
+          "Parch",
+          "Ticket",
+          "Fare",
+          "Cabin",
+          "Embarked"
+        ],
+        "experiments": [
+          {
+            "attempt": 1,
+            "agent": "ml_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7692307692307693,
+            "val_metrics": {
+              "f1": 0.7692307692307693,
+              "accuracy": 0.8146067415730337,
+              "precision": 0.7333333333333333,
+              "recall": 0.8088235294117647
+            },
+            "features_used": [
+              "PassengerId",
+              "Pclass",
+              "Name",
+              "Sex",
+              "Age",
+              "SibSp",
+              "Parch",
+              "Ticket",
+              "Fare",
+              "Cabin",
+              "Embarked"
+            ],
+            "split": "random"
+          },
+          {
+            "attempt": 2,
+            "agent": "ml_engineer",
+            "model_family": "random_forest",
+            "hyperparameters": {
+              "n_estimators": 150,
+              "max_depth": 6
+            },
+            "feature_ops": [],
+            "status": "succeeded",
+            "val_f1": 0.7361111111111112,
+            "val_metrics": {
+              "f1": 0.7361111111111112,
+              "accuracy": 0.7865168539325843,
+              "precision": 0.6973684210526315,
+              "recall": 0.7794117647058824
+            },
+            "features_used": [
+              "PassengerId",
+              "Pclass",
+              "Name",
+              "Sex",
+              "Age",
+              "SibSp",
+              "Parch",
+              "Ticket",
+              "Fare",
+              "Cabin",
+              "Embarked"
+            ],
+            "split": "random"
+          },
+          {
+            "attempt": 3,
+            "agent": "feature_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7692307692307693,
+            "val_metrics": {
+              "f1": 0.7692307692307693,
+              "accuracy": 0.8146067415730337,
+              "precision": 0.7333333333333333,
+              "recall": 0.8088235294117647
+            },
+            "features_used": [
+              "PassengerId",
+              "Pclass",
+              "Name",
+              "Sex",
+              "Age",
+              "SibSp",
+              "Parch",
+              "Ticket",
+              "Fare",
+              "Cabin",
+              "Embarked"
+            ],
+            "split": "random"
+          },
+          {
+            "attempt": 4,
+            "agent": "feature_engineer",
+            "model_family": "logistic_regression",
+            "hyperparameters": {
+              "C": 0.25,
+              "max_iter": 1000
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "succeeded",
+            "val_f1": 0.7692307692307693,
+            "val_metrics": {
+              "f1": 0.7692307692307693,
+              "accuracy": 0.8146067415730337,
+              "precision": 0.7333333333333333,
+              "recall": 0.8088235294117647
+            },
+            "features_used": [
+              "PassengerId",
+              "Pclass",
+              "Name",
+              "Sex",
+              "Age",
+              "SibSp",
+              "Parch",
+              "Ticket",
+              "Fare",
+              "Cabin",
+              "Embarked"
+            ],
+            "split": "random"
+          },
+          {
+            "attempt": 5,
+            "agent": "ml_engineer",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "failed",
+            "error": "TypeError: Sparse data was passed for X, but dense data is required. Use '.toarray()' to convert to a dense numpy array.",
+            "val_f1": null
+          },
+          {
+            "attempt": 6,
+            "agent": "error_recovery",
+            "model_family": "hist_gradient_boosting",
+            "hyperparameters": {
+              "learning_rate": 0.1,
+              "max_iter": 100
+            },
+            "feature_ops": [
+              "cyclical_time",
+              "rush_hour",
+              "weather_comfort"
+            ],
+            "status": "failed",
+            "error": "TypeError: Sparse data was passed for X, but dense data is required. Use '.toarray()' to convert to a dense numpy array.",
+            "val_f1": null
+          }
+        ],
+        "attempts": 6,
+        "holdout": {
+          "metrics": {
+            "f1": 0.7323943661971831,
+            "accuracy": 0.7877094972067039,
+            "precision": 0.7123287671232876,
+            "recall": 0.7536231884057971
+          },
+          "majority_baseline": {
+            "f1": 0.0,
+            "accuracy": 0.6145251396648045,
+            "precision": 0.0,
+            "recall": 0.0
+          },
+          "confusion_matrix": {
+            "labels": [
+              "0",
+              "1"
+            ],
+            "rows_true_cols_pred": [
+              [
+                89,
+                21
+              ],
+              [
+                17,
+                52
+              ]
+            ]
+          },
+          "features_used": [
+            "PassengerId",
+            "Pclass",
+            "Name",
+            "Sex",
+            "Age",
+            "SibSp",
+            "Parch",
+            "Ticket",
+            "Fare",
+            "Cabin",
+            "Embarked"
+          ],
+          "split": "random",
+          "n_holdout": 179
+        },
+        "decisions": [
+          {
+            "step": 1,
+            "next_agent": "data_scientist",
+            "reason": "no profile yet",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 2,
+            "next_agent": "ml_engineer",
+            "reason": "no successful model yet; start with a baseline family",
+            "source": "rules",
+            "attempts_used": 0,
+            "best_val_f1": null
+          },
+          {
+            "step": 3,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['random_forest', 'hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 1,
+            "best_val_f1": 0.7692307692307693
+          },
+          {
+            "step": 4,
+            "next_agent": "feature_engineer",
+            "reason": "progress stalled; features are the likely bottleneck",
+            "source": "rules",
+            "attempts_used": 2,
+            "best_val_f1": 0.7692307692307693
+          },
+          {
+            "step": 5,
+            "next_agent": "feature_engineer",
+            "reason": "progress stalled; features are the likely bottleneck",
+            "source": "rules",
+            "attempts_used": 3,
+            "best_val_f1": 0.7692307692307693
+          },
+          {
+            "step": 6,
+            "next_agent": "ml_engineer",
+            "reason": "untried families: ['hist_gradient_boosting']",
+            "source": "rules",
+            "attempts_used": 4,
+            "best_val_f1": 0.7692307692307693
+          },
+          {
+            "step": 7,
+            "next_agent": "error_recovery",
+            "reason": "last run failed (TypeError: Sparse data was passed for X, but dense data is required. Use '.toarray()' to convert to a dense numpy array.); retry",
+            "source": "rules",
+            "attempts_used": 5,
+            "best_val_f1": 0.7692307692307693
+          },
+          {
+            "step": 8,
+            "next_agent": "holdout_eval",
+            "reason": "budget of 6 training runs used; finalize best",
+            "source": "rules",
+            "attempts_used": 6,
+            "best_val_f1": 0.7692307692307693
+          }
+        ],
+        "agent_path": [
+          "data_validator",
+          "supervisor",
+          "data_scientist",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "feature_engineer",
+          "judge",
+          "supervisor",
+          "feature_engineer",
+          "judge",
+          "supervisor",
+          "ml_engineer",
+          "judge",
+          "supervisor",
+          "error_recovery",
+          "judge",
+          "supervisor",
+          "holdout_eval",
+          "report_writer"
+        ],
+        "duration_s": 0.42
+      },
+      "checks": [
+        {
+          "name": "delivers a trained model",
+          "level": "final",
+          "criterion": "status == trained",
+          "required": true,
+          "score": 1.0,
+          "detail": "trained"
+        },
+        {
+          "name": "holdout F1 \u2265 0.65",
+          "level": "final",
+          "criterion": "F1 on the sealed holdout \u2265 0.65",
+          "required": false,
+          "score": 1.0,
+          "detail": "holdout F1 0.732 (need \u2265 0.65)"
+        },
+        {
+          "name": "beats majority-class baseline",
+          "level": "final",
+          "criterion": "accuracy > always-majority and F1 > 0",
+          "required": false,
+          "score": 1.0,
+          "detail": "acc 0.788 vs majority 0.615"
+        },
+        {
+          "name": "stays within budget",
+          "level": "coordination",
+          "criterion": "training runs \u2264 budget",
+          "required": false,
+          "score": 1.0,
+          "detail": "6 training runs (budget 6)"
+        }
+      ],
+      "score": 1.0,
+      "passed": true
+    }
+  ],
+  "adaptive_graph_mermaid": "---\nconfig:\n  flowchart:\n    curve: linear\n---\ngraph TD;\n\t__start__([<p>__start__</p>]):::first\n\tdata_validator(data_validator)\n\tsupervisor(supervisor)\n\tdata_scientist(data_scientist)\n\tml_engineer(ml_engineer)\n\ttuner(tuner)\n\tfeature_engineer(feature_engineer)\n\terror_recovery(error_recovery)\n\tjudge(judge)\n\tholdout_eval(holdout_eval)\n\treport_writer(report_writer)\n\t__end__([<p>__end__</p>]):::last\n\t__start__ --> data_validator;\n\tdata_scientist --> supervisor;\n\tdata_validator --> supervisor;\n\terror_recovery --> judge;\n\tfeature_engineer --> judge;\n\tholdout_eval --> report_writer;\n\tjudge --> supervisor;\n\tml_engineer --> judge;\n\tsupervisor -.-> data_scientist;\n\tsupervisor -.-> error_recovery;\n\tsupervisor -.-> feature_engineer;\n\tsupervisor -.-> holdout_eval;\n\tsupervisor -.-> ml_engineer;\n\tsupervisor -.-> report_writer;\n\tsupervisor -.-> tuner;\n\ttuner --> judge;\n\treport_writer --> __end__;\n\tclassDef default fill:#f2f0ff,line-height:1.2\n\tclassDef first fill-opacity:0\n\tclassDef last fill:#bfb6fc\n"
+}

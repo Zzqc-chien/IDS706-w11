@@ -87,3 +87,23 @@ def test_invalid_dataset_skips_modeling(hourly_csv):
     result = g.run_solution_loop(dataset_path=str(hourly_csv), target_column="trips", max_cycles=2)
     assert [s["node"] for s in result["steps"]] == ["data_validator", "report_writer"]
     assert result["report"]["validation"]["status"] == "invalid"
+
+
+def test_report_matches_the_single_holdout_fit(hourly_csv):
+    result = g.run_solution_loop(dataset_path=str(hourly_csv), target_column="high_demand", max_cycles=2)
+    report, hold = result["report"], result["holdout_metrics"]
+    cm = report["confusion_matrix"]["rows_true_cols_pred"]
+    tp, fp, fn = cm[1][1], cm[0][1], cm[1][0]
+    assert hold["f1"] == pytest.approx(2 * tp / (2 * tp + fp + fn))
+    assert report["sklearn_version"]
+
+
+def test_validator_screens_on_training_segment_only(hourly_csv, tmp_path):
+    df = pd.read_csv(hourly_csv)
+    n_train = int(len(df) * 0.6)
+    df["future_leak"] = 0.0
+    df.loc[n_train:, "future_leak"] = df.loc[n_train:, "high_demand"]  # perfect only after the train segment
+    path = tmp_path / "late_leak.csv"
+    df.to_csv(path, index=False)
+    out = g.node_data_validator(_state(path))["validation"]
+    assert "future_leak" not in out["leakage_columns"]  # holdout labels must not drive the screen

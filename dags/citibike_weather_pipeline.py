@@ -138,42 +138,43 @@ def citibike_weather_pipeline():
         return total
 
     # ---------- analysis (reads back from the database) ----------
+    # Analysis reads back only this run's months, not everything the table has accumulated.
     @task
-    def make_plots(_rows: int) -> str:
+    def make_plots(_rows: int, months: list[str]) -> str:
         from citibike.analyze import make_plots as plot
         from citibike.load import read_hourly
 
-        return plot(read_hourly(), config.OUTPUT_DIR)
+        return plot(read_hourly(months=months), config.OUTPUT_DIR)
 
     @task
-    def train_model(_rows: int) -> dict:
+    def train_model(_rows: int, months: list[str]) -> dict:
         from citibike.analyze import train_and_evaluate
         from citibike.load import read_hourly, save_metrics
 
-        metrics = train_and_evaluate(read_hourly(), config.OUTPUT_DIR)
+        metrics = train_and_evaluate(read_hourly(months=months), config.OUTPUT_DIR)
         save_metrics(metrics, run_id=get_current_context()["run_id"])
         print(json.dumps(metrics, indent=2))
         return metrics
 
     @task
-    def publish_for_agents(_rows: int) -> str:
+    def publish_for_agents(_rows: int, months: list[str]) -> str:
         """Hand-off to Part 2: CSV + contract in the agent lab's datasets folder."""
         from citibike.load import read_hourly
         from citibike.publish import publish
 
-        path = publish(read_hourly(), config.AGENT_DATASET_DIR)
+        path = publish(read_hourly(months=months), config.AGENT_DATASET_DIR)
         print(f"Published agent dataset: {path}")
         return path
 
     @task_group(group_id="analysis")
-    def analysis_group(rows):
-        make_plots(rows)
-        train_model(rows)
-        publish_for_agents(rows)
+    def analysis_group(rows, months):
+        make_plots(rows, months)
+        train_model(rows, months)
+        publish_for_agents(rows, months)
 
     months = plan_months()
     merged = merge(trips_group(months), weather_group(months))
-    analysis_group(load_to_postgres(merged))
+    analysis_group(load_to_postgres(merged), months)
 
 
 citibike_weather_pipeline()
