@@ -83,3 +83,23 @@ def test_merge_and_model(raw_dir, cleaned, tmp_path):
     assert metrics["rf_r2"] > metrics["baseline_r2"]  # weather features add signal
     assert (tmp_path / "metrics.json").exists() and (tmp_path / "predictions.png").exists()
     assert analyze.make_plots(merged, tmp_path).endswith("eda.png")
+
+
+def test_publish_for_agents_writes_csv_and_contract(raw_dir, cleaned, tmp_path):
+    import json
+
+    from citibike.publish import LEAKAGE_COLUMNS, publish
+
+    _, trips, _ = cleaned
+    weather = pd.concat([transform.read_weather_json(raw_dir / "weather" / f"weather-{m}.json") for m in MONTHS])
+    w, _ = transform.clean_weather(weather, MONTHS)
+    merged = transform.merge_hourly(transform.trips_to_hourly(trips, MONTHS), w)
+
+    path = publish(merged, tmp_path)
+    df = pd.read_csv(path)
+    contract = json.loads((tmp_path / "citibike_hourly_latest.contract.json").read_text())
+    assert list(df.columns[:2]) == ["hour", "high_demand"]
+    assert set(df["high_demand"]) == {0, 1}
+    assert 0.2 < df["high_demand"].mean() < 0.3
+    assert contract["time_column"] == "hour" and contract["leakage_columns"] == LEAKAGE_COLUMNS
+    assert contract["n_rows"] == len(df) == len(merged)

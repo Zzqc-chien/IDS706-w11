@@ -5,7 +5,7 @@ Citi Bike (Jersey City) + weather pipeline.
         ├── trips   [TaskGroup]  extract_trips (one mapped task per month, parallel) → clean_trips
         └── weather [TaskGroup]  extract_weather (one mapped task per month, parallel) → clean_weather
     merge → load_to_postgres
-        └── analysis [TaskGroup]  make_plots ∥ train_model
+        └── analysis [TaskGroup]  make_plots ∥ train_model ∥ publish_for_agents
 
 The trips and weather branches don't depend on each other, so they run in parallel;
 inside each branch the monthly downloads run in parallel too (dynamic task mapping).
@@ -155,10 +155,21 @@ def citibike_weather_pipeline():
         print(json.dumps(metrics, indent=2))
         return metrics
 
+    @task
+    def publish_for_agents(_rows: int) -> str:
+        """Hand-off to Part 2: CSV + contract in the agent lab's datasets folder."""
+        from citibike.load import read_hourly
+        from citibike.publish import publish
+
+        path = publish(read_hourly(), config.AGENT_DATASET_DIR)
+        print(f"Published agent dataset: {path}")
+        return path
+
     @task_group(group_id="analysis")
     def analysis_group(rows):
         make_plots(rows)
         train_model(rows)
+        publish_for_agents(rows)
 
     months = plan_months()
     merged = merge(trips_group(months), weather_group(months))

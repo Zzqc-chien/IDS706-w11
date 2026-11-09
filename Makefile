@@ -1,7 +1,7 @@
 COMPOSE ?= docker compose
 DAG := citibike_weather_pipeline
 
-.PHONY: help up down logs test sample-data trigger clean
+.PHONY: help up down logs test sample-data trigger clean agents agents-down
 
 help:
 	@echo "make up           build images and start Airflow (UI: http://localhost:8080, airflow/airflow)"
@@ -11,6 +11,8 @@ help:
 	@echo "make sample-data  write synthetic raw files to data/raw (offline demo)"
 	@echo "make down         stop containers (databases are kept)"
 	@echo "make clean        stop and delete databases, logs and data"
+	@echo "make agents       Part 2: start the agent lab (UI: http://127.0.0.1:5173/solution-loop)"
+	@echo "make agents-down  Part 2: stop the agent lab"
 
 up:
 	$(COMPOSE) up -d --build
@@ -36,3 +38,9 @@ trigger:
 clean:
 	$(COMPOSE) down -v
 	rm -rf data/raw data/processed data/output logs/*/
+
+agents:
+	$(MAKE) -C agent-lab start-mac
+
+agents-down:
+	$(MAKE) -C agent-lab down-mac

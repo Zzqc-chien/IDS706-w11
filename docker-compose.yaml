@@ -25,6 +25,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
     # pipeline settings (see dags/citibike/config.py)
     DATA_DIR: /opt/airflow/data
+    AGENT_DATASET_DIR: /opt/airflow/agent_datasets
     PIPELINE_DB_URI: postgresql+psycopg://pipeline:pipeline@pipeline-db:5432/citibike
     PYTHONPATH: /opt/airflow/dags
   volumes:
@@ -33,6 +34,7 @@ x-airflow-common: &airflow-common
     - ./config:/opt/airflow/config
     - ./plugins:/opt/airflow/plugins
     - ./data:/opt/airflow/data
+    - ./agent-lab/datasets:/opt/airflow/agent_datasets   # Part 2 hand-off
     - ./tests:/opt/airflow/tests
     - ./scripts:/opt/airflow/scripts
   user: "${AIRFLOW_UID:-50000}:0"
@@ -143,10 +145,10 @@ services:
     command:
       - -c
       - |
-        mkdir -p /opt/airflow/{logs,dags,plugins,config,data}
+        mkdir -p /opt/airflow/{logs,dags,plugins,config,data,agent_datasets}
         /entrypoint airflow version
         /entrypoint airflow config list >/dev/null
-        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/{logs,dags,plugins,config,data}
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/airflow/{logs,dags,plugins,config,data,agent_datasets}
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: "true"

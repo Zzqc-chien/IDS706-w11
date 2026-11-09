@@ -6,6 +6,8 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/opt/airflow/data"))
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"
 OUTPUT_DIR = DATA_DIR / "output"
+# Part 2 hand-off: mounted from ./agent-lab/datasets in docker-compose.
+AGENT_DATASET_DIR = Path(os.environ.get("AGENT_DATASET_DIR", "/opt/airflow/agent_datasets"))
 
 # SQLAlchemy URI of the database that stores the cleaned data (not Airflow's own metadata DB).
 PIPELINE_DB_URI = os.environ.get(

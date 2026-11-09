@@ -1,6 +1,15 @@
 # Citi Bike demand pipeline: Airflow + agent-based ML
 
-An end-to-end pipeline that ingests **Citi Bike trip records** and **hourly weather**, cleans and merges them in **Apache Airflow 3.4**, loads the result into **PostgreSQL**, then analyzes it: exploratory plots plus a model that forecasts hourly bike demand. Part 2 trains and evaluates a model on the same cleaned data with an agent-based workflow.
+An end-to-end pipeline that ingests **Citi Bike trip records** and **hourly weather**, cleans and merges them in **Apache Airflow 3.4**, loads the result into **PostgreSQL**, then analyzes it: exploratory plots plus a model that forecasts hourly bike demand.
+
+**Part 2** (`agent-lab/`) adapts the in-class LangGraph agent workflow to train and evaluate a model on the same cleaned data, which Airflow hands over as a CSV plus a data contract.
+
+```
+Part 1 (Airflow, :8080)                                   Part 2 (agent lab, :5173)
+Citi Bike + weather → clean ∥ clean → merge → Postgres → publish_for_agents ──► agent-lab/datasets/
+                                                   └→ plots ∥ model                 citibike_hourly_latest.csv
+                                                                                    + .contract.json
+```
 
 ## Quick start
 
@@ -13,6 +22,15 @@ make trigger     # unpause the DAG and trigger a run (or click ▶ in the UI)
 make test        # unit tests, run inside the container
 make down        # stop (data is kept);  make clean  deletes everything
 ```
+
+Part 2 runs as a separate stack (gateway + UI). It needs Node.js 20+ in addition to Docker.
+
+```bash
+make agents      # = cd agent-lab && make start-mac   → http://127.0.0.1:5173/solution-loop
+make agents-down
+```
+
+Run Part 1 first, so `agent-lab/datasets/citibike_hourly_latest.csv` exists. Then, on `/solution-loop`, pick that dataset, set target `high_demand` and budget `5`, and click **Run loop**. Adding an `OPENROUTER_API_KEY` to `agent-lab/.env` (free key) lets the agents use an LLM. Without it they use deterministic heuristics, and the loop still runs end to end.
 
 The cleaned data lives in the `pipeline-db` database, which is reachable from your machine:
 
@@ -83,6 +101,7 @@ merge → load_to_postgres
 Both analysis tasks **read the data back from Postgres**.
 
 - `eda.png`: average trips by hour (weekday vs weekend), trips vs temperature (dry vs raining), daily trips vs rainfall.
+- `publish_for_agents`: the Part 2 hand-off (see below). It runs in parallel with the other two.
 - `train_model`: a `RandomForestRegressor` predicts trips per hour from time and weather features. It is compared with a seasonal baseline: the average for the same day-of-week and hour in the training data.
   - The split is **chronological** (last 20% of hours as the test set), so the model is never evaluated on hours earlier than the ones it trained on.
   - Metrics: MAE, RMSE and R², written to `data/output/metrics.json` and appended to the `model_metrics` table with the run id. Plot: `predictions.png`.
@@ -100,14 +119,33 @@ Key findings: _fill in after the run. For example: the weekday commute peaks (8a
 
 ## Part 2: agent-based ML workflow
 
-_To be added: the in-class agent template adapted to train and evaluate a model on `hourly_demand`._
+`agent-lab/` is the in-class template ([Kedar-V/automl-research-lab](https://github.com/Kedar-V/automl-research-lab)) with a modified solution loop. **Full details: [`agent-lab/CHANGES.md`](agent-lab/CHANGES.md).**
+
+**Task.** Classify each hour as `high_demand` (trips at or above the 75th percentile) from weather and calendar features. Metric: F1 on the busy class, plus accuracy, precision and recall.
+
+**Agent modifications.**
+- **Data Validator (new):** reads the data contract from Airflow, finds the time column, and flags leakage columns: `trips`, `member_share`, `ebike_share` and `avg_duration_min` are computed from the same rides as the label. It also flags any column that alone separates the classes. An invalid dataset skips straight to the report.
+- **ML Engineer (modified):** a guardrail always drops the leakage columns, even if the LLM's spec keeps them. It splits **chronologically** (last 20% of hours = holdout), because a random split leaks neighbouring hours.
+- **Heuristic strategy (modified):** baseline, then each model family once, then tune the best family. The original kept re-tuning logistic regression.
+- **Report Writer (new):** confusion matrix, majority-class baseline, feature importances, and the full experiment history, saved to `agent-lab/artifacts/loop_reports/`.
+- **Live agent graph:** shows both new agents and the validator's `ok` / `invalid` routes.
+
+### Part 2 results
+
+> Replace this with your run's numbers (UI panels + `agent-lab/artifacts/loop_reports/report-*.json`).
+
+| Experiment | Model family | Val F1 | Judge |
+|---|---|---|---|
+| 1 | _ | _ | _ |
+
+Holdout (best model): F1 _ · accuracy _ · majority-class baseline accuracy _
 
 ## Screenshots (`docs/screenshots/`)
 
 - [ ] DAG run succeeded (Grid view, all tasks green)
 - [ ] DAG Graph view (shows the TaskGroups and the parallel branches)
 - [ ] Agent graph (Part 2)
-- [ ] Model evaluation results (Part 1 `metrics.json` / `predictions.png`, and Part 2)
+- [ ] Model evaluation results: Part 1 `metrics.json` / `predictions.png`; Part 2 experiment timeline and holdout panel
 
 ## Repository layout
 
@@ -118,5 +156,6 @@ scripts/make_sample_data.py         synthetic raw files for tests and offline ru
 tests/                              pytest unit tests
 Dockerfile, docker-compose.yaml     Airflow 3.4 (LocalExecutor) + Postgres ×2
 .devcontainer/                      VS Code dev container
-Makefile                            up / trigger / test / down / clean
+Makefile                            up / trigger / test / down / clean / agents
+agent-lab/                          Part 2: in-class agent template + changes (see CHANGES.md)
 ```
